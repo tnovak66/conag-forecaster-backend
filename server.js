@@ -1,4 +1,4 @@
-// server.js - FINAL VERSION v2 - June 17, 2025
+// server.js - FINAL VERSION v3 - Corrected Brevo/Fetch
 
 // 1. Import Dependencies
 require('dotenv').config();
@@ -6,7 +6,7 @@ const express = require('express');
 const cors = require('cors');
 const { GoogleSpreadsheet } = require('google-spreadsheet');
 const Brevo = require('@getbrevo/brevo');
-const fetch = require('node-fetch'); // <-- ADD THIS LINE
+const fetch = require('node-fetch');
 
 // 2. Initialize App & CORS
 const app = express();
@@ -24,73 +24,32 @@ app.use(cors(corsOptions));
 app.use(express.json());
 
 
-// --- Endpoint 3: Securely proxy requests to the Gemini API (CORRECTED) ---
-app.post('/api/gemini-proxy', async (req, res) => {
-    const { prompt, isJsonOutput, schema } = req.body;
-    console.log("Gemini proxy called..."); // For debugging
-
-    if (!prompt) {
-        return res.status(400).json({ error: { message: "Prompt is required." } });
-    }
-
-    const geminiApiKey = process.env.GEMINI_API_KEY;
-    // Using a stable, recommended model name
-    const model = isJsonOutput ? "gemini-1.5-flash-latest" : "gemini-pro";
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`;
-    
-    let payload = {
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-    };
-    
-    if (isJsonOutput && schema) {
-        // Corrected property names for JSON mode
-        payload.generationConfig = {
-            "response_mime_type": "application/json",
-            "response_schema": schema
-        };
-    }
-
-    try {
-        const geminiResponse = await fetch(apiUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-        
-        const data = await geminiResponse.json();
-
-        // If the response from Google is not OK, forward the error
-        if (!geminiResponse.ok) {
-            console.error("Error from Gemini API:", data);
-            return res.status(geminiResponse.status).json(data);
-        }
-
-        // Success, send the response back to the client
-        res.status(200).json(data);
-
-    } catch (error) {
-        console.error("Fatal error in Gemini Proxy:", error);
-        res.status(500).json({ error: { message: "A critical error occurred on the backend while contacting the AI service." } });
-    }
-});
+// --- Helper function to get an authenticated Brevo API client ---
+function getBrevoApiClient(apiType) {
+    let defaultClient = Brevo.ApiClient.instance;
+    let apiKey = defaultClient.authentications['api-key'];
+    apiKey.apiKey = process.env.BREVO_API_KEY;
+    return new apiType();
+}
 
 
-// --- Other Endpoints (Unchanged) ---
+// --- API ENDPOINTS ---
 
 // Endpoint 1: Log usage data
 app.post('/api/log-forecast-usage', async (req, res) => {
-    // ... code for this endpoint is unchanged
     const scenarioData = req.body;
-    const contactApi = new Brevo.ContactsApi();
-    contactApi.setApiKey(Brevo.ContactsApiApiKeys.apiKey, process.env.BREVO_API_KEY);
+    console.log('Logging data for:', scenarioData.userEmail);
     try {
+        const contactApi = getBrevoApiClient(Brevo.ContactsApi);
         const createContactRequest = new Brevo.CreateContact();
         createContactRequest.email = scenarioData.userEmail;
         createContactRequest.listIds = [parseInt(process.env.BREVO_LEAD_LIST_ID)];
         createContactRequest.attributes = {'FIRSTNAME': scenarioData.userName, 'COMPANY': scenarioData.userCompany};
         createContactRequest.updateEnabled = true;
         await contactApi.createContact(createContactRequest);
-    } catch (error) {}
+    } catch (error) {
+        console.error('Brevo API Error:', error.response ? error.response.body : error.message);
+    }
     try {
         const doc = new GoogleSpreadsheet(process.env.GOOGLE_SHEET_ID);
         await doc.useServiceAccountAuth({
@@ -108,36 +67,70 @@ app.post('/api/log-forecast-usage', async (req, res) => {
             'Net Gain': scenarioData.netGainFromOneSale,
         };
         await sheet.addRow(newRow);
-    } catch (error) {}
+    } catch (error) {
+        console.error('Google Sheets Error:', error.message);
+    }
     res.status(200).json({ message: 'Data logged successfully' });
 });
 
 // Endpoint 2: Send email
 app.post('/api/send-forecast-report', async (req, res) => {
-    // ... code for this endpoint is unchanged
     const reportData = req.body;
-    if (!reportData || !reportData.userEmail) { return res.status(400).json({ message: 'Missing report data or user email.' }); }
-    const brevoApi = new Brevo.TransactionalEmailsApi();
-    brevoApi.setApiKey(Brevo.TransactionalEmailsApiApiKeys.apiKey, process.env.BREVO_API_KEY);
-    const formatCurrency = (num) => `$${Math.round(num).toLocaleString()}`;
-    const htmlContent = `<h1>Your Marketing Investment Forecast</h1><p>Hi ${reportData.userName},</p><p>Here is a summary of your report.</p><h3>📈 Forecast Results</h3><ul><li>Total Monthly Spend: <strong>${formatCurrency(reportData.totalMonthlyMarketingSpend)}</strong></li><li>Profit from ONE Sale: <strong>${formatCurrency(reportData.profitFromOneSale)}</strong></li><li style="font-size: 1.2em;">Estimated Net Gain: <strong>${formatCurrency(reportData.netGainFromOneSale)}</strong></li></ul><h3>📋 Your Selections</h3><ul><li>Company: ${reportData.userCompany}</li><li>Avg. Sale Value: ${formatCurrency(reportData.avgSaleValue)}</li><li>Avg. Profit Margin: ${reportData.avgProfitMargin}%</li></ul>`;
+    console.log('Sending email to:', reportData.userEmail);
+    if (!reportData || !reportData.userEmail) { return res.status(400).json({ message: 'Missing report data.' }); }
+    
     try {
+        const transactionalEmailsApi = getBrevoApiClient(Brevo.TransactionalEmailsApi);
+        const formatCurrency = (num) => `$${Math.round(num).toLocaleString()}`;
+        const htmlContent = `<h1>Your Marketing Investment Forecast</h1><p>Hi ${reportData.userName},</p><p>Here is a summary of your report.</p><h3>📈 Forecast Results</h3><ul><li>Total Monthly Spend: <strong>${formatCurrency(reportData.totalMonthlyMarketingSpend)}</strong></li><li>Profit from ONE Sale: <strong>${formatCurrency(reportData.profitFromOneSale)}</strong></li><li style="font-size: 1.2em;">Estimated Net Gain: <strong>${formatCurrency(reportData.netGainFromOneSale)}</strong></li></ul>`;
+        
         const sendSmtpEmail = new Brevo.SendSmtpEmail();
         sendSmtpEmail.to = [{ email: reportData.userEmail, name: reportData.userName }];
         sendSmtpEmail.bcc = [{ email: process.env.MARKETING_TEAM_EMAIL, name: 'ConAg Marketing Team' }];
         sendSmtpEmail.sender = { email: process.env.BREVO_SENDER_EMAIL, name: 'ConAg Marketing Forecaster' };
         sendSmtpEmail.subject = `Your Marketing Forecast from ConAg Marketing`;
         sendSmtpEmail.htmlContent = htmlContent;
-        await brevoApi.sendTransacEmail(sendSmtpEmail);
+        await transactionalEmailsApi.sendTransacEmail(sendSmtpEmail);
         res.status(200).json({ message: 'Report emailed successfully!' });
     } catch (error) {
-        res.status(500).json({ message: 'There was an error sending your report.' });
+        console.error('Brevo Email Error:', error.response ? error.response.body : error.message);
+        res.status(500).json({ message: 'A server error occurred while sending the email.' });
+    }
+});
+
+// Endpoint 3: Gemini proxy
+app.post('/api/gemini-proxy', async (req, res) => {
+    const { prompt, isJsonOutput, schema } = req.body;
+    if (!prompt) { return res.status(400).json({ error: { message: "Prompt is required." } }); }
+
+    const geminiApiKey = process.env.GEMINI_API_KEY;
+    const model = isJsonOutput ? "gemini-1.5-flash-latest" : "gemini-pro";
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`;
+    
+    let payload = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
+    if (isJsonOutput && schema) { payload.generationConfig = { "response_mime_type": "application/json", "response_schema": schema }; }
+
+    try {
+        const geminiResponse = await fetch(apiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const data = await geminiResponse.json();
+        if (!geminiResponse.ok) {
+            console.error("Error from Gemini API:", data);
+            return res.status(geminiResponse.status).json(data);
+        }
+        res.status(200).json(data);
+    } catch (error) {
+        console.error("Fatal error in Gemini Proxy:", error);
+        res.status(500).json({ error: { message: "A critical error occurred on the backend while contacting the AI service." } });
     }
 });
 
 
 // Start the Server
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
     console.log(`✅ Server is running on port ${PORT}`);
 });
