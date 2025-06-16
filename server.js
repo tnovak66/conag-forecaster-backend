@@ -93,7 +93,7 @@ app.post('/api/send-forecast-report', async (req, res) => {
     try {
         const transactionalEmailsApi = getBrevoApiClient(Brevo.TransactionalEmailsApi);
         const formatCurrency = (num) => `$${Math.round(num || 0).toLocaleString()}`;
-        const htmlContent = `<h1>Your Marketing Investment Forecast</h1><p>Hi ${reportData.userName},</p><p>Here is a summary of your report.</p><h3>?? Forecast Results</h3><ul><li>Total Monthly Spend: <strong>${formatCurrency(reportData.totalMonthlyMarketingSpend)}</strong></li><li>Profit from ONE Sale: <strong>${formatCurrency(reportData.profitFromOneSale)}</strong></li><li style="font-size: 1.2em;">Estimated Net Gain: <strong>${formatCurrency(reportData.netGainFromOneSale)}</strong></li></ul>`;
+        const htmlContent = `<h1>Your Marketing Investment Forecast</h1><p>Hi ${reportData.userName},</p><p>Here is a summary of your report.</p><h3>📈 Forecast Results</h3><ul><li>Total Monthly Spend: <strong>${formatCurrency(reportData.totalMonthlyMarketingSpend)}</strong></li><li>Profit from ONE Sale: <strong>${formatCurrency(reportData.profitFromOneSale)}</strong></li><li style="font-size: 1.2em;">Estimated Net Gain: <strong>${formatCurrency(reportData.netGainFromOneSale)}</strong></li></ul>`;
         
         const sendSmtpEmail = new Brevo.SendSmtpEmail();
         sendSmtpEmail.to = [{ email: reportData.userEmail, name: reportData.userName }];
@@ -152,5 +152,5 @@ app.post('/api/gemini-proxy', async (req, res) => {
 // Start the Server
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-    console.log(`? Server is running on port ${PORT}`);
+    console.log(`✅ Server is running on port ${PORT}`);
 });
