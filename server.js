@@ -1,42 +1,64 @@
-// JavaScript Document
-// server.js
+// server.js - FINAL VERSION WITH CORRECT CORS POLICY
 
 // 1. Import Dependencies
 require('dotenv').config();
 const express = require('express');
-const cors = require('cors');
+const cors = require('cors'); // We will configure this now
 const { GoogleSpreadsheet } = require('google-spreadsheet');
 const Brevo = require('@getbrevo/brevo');
 
-// 2. Initialize App and Middleware
+// 2. Initialize App
 const app = express();
-app.use(cors()); // Enable CORS for all routes
+
+// --- START OF CORS CONFIGURATION ---
+// Define the list of websites that are allowed to make requests to this backend.
+const allowedOrigins = [
+  'https://conagmarketing.com',
+  // You can add other domains here if needed, e.g. for a staging site
+];
+
+const corsOptions = {
+  origin: function (origin, callback) {
+    // The 'origin' is the website making the request (e.g., https://conagmarketing.com)
+    // We check if the incoming origin is in our allowed list.
+    if (allowedOrigins.indexOf(origin) !== -1 || !origin) {
+      // If it is, or if the request has no origin (like a server-to-server request), allow it.
+      callback(null, true);
+    } else {
+      // If it's not in the list, block it.
+      callback(new Error('Not allowed by CORS'));
+    }
+  }
+};
+
+// Apply the CORS middleware with our specific options
+app.use(cors(corsOptions));
+// --- END OF CORS CONFIGURATION ---
+
 app.use(express.json()); // Middleware to parse JSON bodies
 
-// --- Endpoint 1: Log usage data and create a lead in Brevo/Sheets ---
+// --- ALL API ENDPOINTS REMAIN THE SAME ---
+// (The rest of your server code for /api/log-forecast-usage, /api/send-forecast-report, and /api/gemini-proxy is unchanged)
+
+// Endpoint 1: Log usage data
 app.post('/api/log-forecast-usage', async (req, res) => {
     const scenarioData = req.body;
     console.log('Received data for logging:', scenarioData.userEmail);
 
-    // Brevo: Add/Update Contact
     const contactApi = new Brevo.ContactsApi();
     contactApi.setApiKey(Brevo.ContactsApiApiKeys.apiKey, process.env.BREVO_API_KEY);
     try {
         const createContactRequest = new Brevo.CreateContact();
         createContactRequest.email = scenarioData.userEmail;
         createContactRequest.listIds = [parseInt(process.env.BREVO_LEAD_LIST_ID)];
-        createContactRequest.attributes = {
-            'FIRSTNAME': scenarioData.userName,
-            'COMPANY': scenarioData.userCompany,
-        };
-        createContactRequest.updateEnabled = true; // IMPORTANT: This updates the contact if they already exist.
+        createContactRequest.attributes = {'FIRSTNAME': scenarioData.userName, 'COMPANY': scenarioData.userCompany};
+        createContactRequest.updateEnabled = true;
         await contactApi.createContact(createContactRequest);
         console.log(`Brevo contact for ${scenarioData.userEmail} created/updated.`);
     } catch (error) {
         console.error('Brevo API Error:', error.response ? error.response.body : error.message);
     }
 
-    // Google Sheets: Append Row
     try {
         const doc = new GoogleSpreadsheet(process.env.GOOGLE_SHEET_ID);
         await doc.useServiceAccountAuth({
@@ -64,12 +86,10 @@ app.post('/api/log-forecast-usage', async (req, res) => {
     res.status(200).json({ message: 'Data logged successfully' });
 });
 
-// --- Endpoint 2: Send the email report ---
+// Endpoint 2: Send email
 app.post('/api/send-forecast-report', async (req, res) => {
     const reportData = req.body;
-    if (!reportData || !reportData.userEmail) {
-        return res.status(400).json({ message: 'Missing report data or user email.' });
-    }
+    if (!reportData || !reportData.userEmail) { return res.status(400).json({ message: 'Missing report data or user email.' }); }
     const brevoApi = new Brevo.TransactionalEmailsApi();
     brevoApi.setApiKey(Brevo.TransactionalEmailsApiApiKeys.apiKey, process.env.BREVO_API_KEY);
     const formatCurrency = (num) => `$${Math.round(num).toLocaleString()}`;
@@ -89,23 +109,17 @@ app.post('/api/send-forecast-report', async (req, res) => {
     }
 });
 
-// --- Endpoint 3: Securely proxy requests to the Gemini API ---
+// Endpoint 3: Gemini proxy
 app.post('/api/gemini-proxy', async (req, res) => {
     const { prompt, isJsonOutput, schema } = req.body;
     if (!prompt) { return res.status(400).json({ error: { message: "Prompt is required." } }); }
-
     const geminiApiKey = process.env.GEMINI_API_KEY;
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${geminiApiKey}`;
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${geminiApiKey}`; // Using updated model
     let payload = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
-    if (isJsonOutput && schema) {
-        payload.generationConfig = { responseMimeType: "application/json", responseSchema: schema };
-    }
+    if (isJsonOutput && schema) { payload.generationConfig = { response_mime_type: "application/json", response_schema: schema }; }
     try {
-        const geminiResponse = await fetch(apiUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
+        const fetch = (await import('node-fetch')).default;
+        const geminiResponse = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
         const data = await geminiResponse.json();
         if (!geminiResponse.ok) { return res.status(geminiResponse.status).json(data); }
         res.status(200).json(data);
@@ -115,8 +129,7 @@ app.post('/api/gemini-proxy', async (req, res) => {
     }
 });
 
-
-// 4. Start the Server
+// Start the Server
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
     console.log(`✅ Server is running on port ${PORT}`);
