@@ -1,4 +1,4 @@
-// server.js - FINAL VERSION v5 - Corrected variable typo
+// server.js - FINAL VERSION v8 - Standardizing the AI Model
 
 // 1. Import Dependencies
 require('dotenv').config();
@@ -52,7 +52,6 @@ app.post('/api/log-forecast-usage', async (req, res) => {
         const createContactRequest = new Brevo.CreateContact();
         createContactRequest.email = scenarioData.userEmail;
         createContactRequest.listIds = [parseInt(process.env.BREVO_LEAD_LIST_ID)];
-        // FIX: Corrected variable name from scenario_data to scenarioData
         createContactRequest.attributes = {'FIRSTNAME': scenarioData.userName, 'COMPANY': scenarioData.userCompany};
         createContactRequest.updateEnabled = true;
         await contactApi.createContact(createContactRequest);
@@ -92,7 +91,7 @@ app.post('/api/send-forecast-report', async (req, res) => {
     try {
         const transactionalEmailsApi = getBrevoApiClient(Brevo.TransactionalEmailsApi);
         const formatCurrency = (num) => `$${Math.round(num || 0).toLocaleString()}`;
-        const htmlContent = `<h1>Your Marketing Investment Forecast</h1><p>Hi ${reportData.userName},</p><p>Here is a summary of your report.</p><h3>?? Forecast Results</h3><ul><li>Total Monthly Spend: <strong>${formatCurrency(reportData.totalMonthlyMarketingSpend)}</strong></li><li>Profit from ONE Sale: <strong>${formatCurrency(reportData.profitFromOneSale)}</strong></li><li style="font-size: 1.2em;">Estimated Net Gain: <strong>${formatCurrency(reportData.netGainFromOneSale)}</strong></li></ul>`;
+        const htmlContent = `<h1>Your Marketing Investment Forecast</h1><p>Hi ${reportData.userName},</p><p>Here is a summary of your report.</p><h3>📈 Forecast Results</h3><ul><li>Total Monthly Spend: <strong>${formatCurrency(reportData.totalMonthlyMarketingSpend)}</strong></li><li>Profit from ONE Sale: <strong>${formatCurrency(reportData.profitFromOneSale)}</strong></li><li style="font-size: 1.2em;">Estimated Net Gain: <strong>${formatCurrency(reportData.netGainFromOneSale)}</strong></li></ul>`;
         
         const sendSmtpEmail = new Brevo.SendSmtpEmail();
         sendSmtpEmail.to = [{ email: reportData.userEmail, name: reportData.userName }];
@@ -109,14 +108,19 @@ app.post('/api/send-forecast-report', async (req, res) => {
     }
 });
 
-// Endpoint 3: Gemini proxy
+// Endpoint 3: Gemini proxy (Corrected)
 app.post('/api/gemini-proxy', async (req, res) => {
     const { prompt, isJsonOutput, schema } = req.body;
     console.log('--- AI proxy endpoint called. ---');
     if (!prompt) { return res.status(400).json({ error: { message: "Prompt is required." } }); }
 
     const geminiApiKey = process.env.GEMINI_API_KEY;
-    const model = isJsonOutput ? "gemini-1.5-flash-latest" : "gemini-pro";
+    
+    // =========================================================================
+    // THE FIX: Use the modern 'gemini-1.5-flash-latest' model for ALL requests.
+    // =========================================================================
+    const model = "gemini-1.5-flash-latest"; 
+    
     const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`;
     
     let payload = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
@@ -150,5 +154,5 @@ app.post('/api/gemini-proxy', async (req, res) => {
 // Start the Server
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-    console.log(`? Server is running on port ${PORT}`);
+    console.log(`✅ Server is running on port ${PORT}`);
 });
